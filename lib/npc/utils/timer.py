@@ -8,7 +8,7 @@ import time
 import functools
 from contextlib import ContextDecorator
 
-VERBOSE_TIMING = False
+VERBOSE_TIMING = True
 
 class Timer():
     """A simple timer."""

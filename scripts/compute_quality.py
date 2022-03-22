@@ -14,6 +14,7 @@ import torch.nn.functional as tnnf
 from einops import rearrange,repeat
 from easydict import EasyDict as edict
 import vnlb
+from npc.utils import Timer
 
 # -- set seed [randomly order denoised pixels] --
 seed = 123
@@ -33,11 +34,11 @@ th.backends.cudnn.benchmark = False
 # dname = "hat_wiggle_stable"
 # dname = "pinecone_tree_breeze"
 # dname = "brickwall"
-# dname = "motorbike"
+dname = "motorbike"
 # dname = "grass_cloves"
 # dname = "pinecone_tree_breeze"
-dname = "text_bus"
-clean = npc.testing.load_dataset(dname,vnlb=False,nframes=30,ext="png")[0]['clean']
+# dname = "text_bus"
+clean = npc.testing.load_dataset(dname,vnlb=False,nframes=10,ext="png")[0]['clean']
 # clean = npc.testing.load_dataset("brickwall",vnlb=False,nframes=30)[0]['clean'].copy()
 # clean = npc.testing.load_dataset("pinecone_brick",vnlb=False,nframes=30)[0]['clean']
 # clean = npc.testing.load_dataset("pinecone_brick",vnlb=False,nframes=30)[0]['clean']
@@ -168,16 +169,23 @@ th.save(noisy,"noisy.pth")
 sigma = std
 # methods = ["npc","oracle","oracle_og","vnlb"]
 # methods = ["npc-nlm","npc"]
-# methods = ["vnlb"]
-methods = ["npc","vnlb"]
+# methods = ["npc","vnlb"]
+# methods = ["npc-eccv2022"]
+methods = ["npc"]
 for method in methods:
+    clock = Timer()
+    clock.tic()
     if method == "oracle":
         output = npc.vnlb_denoise(noisy,sigma,niters=3,clean=clean,kmax=50,
                                   oracle=True,verbose=True)
         deno,basic,dtime,inpc,pm_errors = output
     elif method == "npc":
         output = npc.vnlb_denoise(noisy,sigma,niters=3,clean=None,kmax=50,
-                                  oracle=False,verbose=True)
+                                  oracle=False,verbose=True,version="faiss")
+        deno,basic,dtime,inpc,pm_errors = output
+    elif method == "npc-eccv2022":
+        output = npc.vnlb_denoise(noisy,sigma,niters=3,clean=None,kmax=50,
+                                  oracle=False,verbose=True,version="eccv2022")
         deno,basic,dtime,inpc,pm_errors = output
     elif method == "npc-wnnm":
         output = npc.denoise(noisy,sigma,niters=3,clean=clean,kmax=50,
@@ -196,6 +204,8 @@ for method in methods:
     else:
         print("huh?")
         exit(0)
+    clock.toc()
+    dtime = clock.diff
 
     # -- Message --
     print(f"method: [{method}]")

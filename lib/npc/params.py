@@ -31,8 +31,9 @@ def default_params(sigma,verbose=False):
     params.rank = [39,39]
     params.sigma = [sigma,sigma]
     params.sigmaBasic = [sigma,0]
-    params.sizePatch  = [7,7]
-    params.sizePatchTime  = [2,2]
+    # params.sizePatch  = [7,7]
+    params.sizePatch  = [5,5]
+    params.sizePatchTime  = [1,1]
     params.sizeSearchTimeBwd = [6,6]
     params.sizeSearchTimeFwd = [6,6]
     params.sizeSearchWindow = [27,27]
@@ -48,6 +49,8 @@ def default_params(sigma,verbose=False):
     params.variThres = [2.7,0.7] # 0.7
     params.verbose = [verbose,verbose]
     params.rand_mask = [True,True]
+    params.eigh_method = ["torch","torch"]
+    # params.eigh_method = ["faiss","faiss"]
     return params
 
 def get_params(sigma,verbose=False,version=None):

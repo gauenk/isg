@@ -76,17 +76,32 @@ def allocate_flows(flows,shape,device):
         flows = edict({k:v.to(device) for k,v in flows.items()})
     return flows
 
+def allocate_bufs_faiss(shape,device):
+
+    # -- unpack shapes --
+    tsize,npa = shape
+    tf32 = th.float32
+    ti32 = th.int32
+
+    # -- alloc mem --
+    l2bufs = edict()
+    l2bufs.vals = th.zeros((tsize,npa),dtype=tf32,device=device)
+    l2bufs.inds = -th.ones((tsize,npa),dtype=ti32,device=device)
+    l2bufs.shape = shape
+
+    return l2bufs
+
 def allocate_bufs(shape,device):
 
     # -- unpack shapes --
     tsize,npa = shape
     tf32 = th.float32
-    tfl = th.long
+    tl = th.long
 
     # -- alloc mem --
     l2bufs = edict()
-    l2bufs.vals = th.zeros((tsize,npa)).type(tf32).to(device)
-    l2bufs.inds = -th.ones((tsize,npa)).type(tfl).to(device)
+    l2bufs.vals = th.zeros((tsize,npa),dtype=tf32,device=device)
+    l2bufs.inds = -th.ones((tsize,npa),dtype=tl,device=device)
     l2bufs.shape = shape
 
     return l2bufs

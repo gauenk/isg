@@ -18,8 +18,9 @@ from vnlb import denoise_npc
 import npc.alloc as alloc
 from .step import exec_step
 from .proc_nl import proc_nl
+from .proc_nl_faiss import proc_nl_faiss
 from .params import get_args,get_params
-from .utils import Timer,optional
+from .utils import Timer,optional,optional_rm
 from .eval_cluster import compute_cluster_quality
 from .eval_deltas import compute_nn_patches
 
@@ -42,15 +43,19 @@ def vnlb_denoise(noisy, sigma, **kwargs):
 
     # -- exec our method --
     inpc,pm_errors = exec_npc(noisy, sigma, **kwargs)
+    th.cuda.empty_cache()
 
     # -- run a denoiser --
-    deno,basic,dtime = denoise_npc(noisy,sigma,inpc)
+    deno,basic,dtime = denoise_npc(noisy,sigma,inpc,eigh_method="faiss")
+    # deno,basic,dtime = denoise_npc(noisy,sigma,inpc,eigh_method="torch")
+
     return deno,basic,dtime,inpc,pm_errors
 
 def denoise(noisy, sigma, **kwargs):
 
     # -- exec our method --
     inpc,pm_errors = exec_npc(noisy, sigma, **kwargs)
+    th.cuda.empty_cache()
 
     # -- run a denoiser --
     dtype = optional(kwargs,"post_deno","bayes")
@@ -100,9 +105,19 @@ def compute_pm_error(noisy,clean,sigma,search=None,flows=None,
 
     return error
 
-def exec_npc(noisy, sigma, niters=3, ksched="default", kmax=50,
-             gpuid=0, clean=None, verbose=True, oracle=False,
-             pm_deno="bayes",full_basic=False):
+def exec_npc(noisy, sigma, **kwargs):
+    version = optional(kwargs,"version","faiss")
+    optional_rm(kwargs,"version")
+    if version == "eccv2022":
+        return exec_npc_eccv2022(noisy,sigma,**kwargs)
+    elif version == "faiss":
+        return exec_npc_faiss(noisy,sigma,**kwargs)
+    else:
+        raise ValueError(f"Uknown search method [{version}]")
+
+def exec_npc_eccv2022(noisy, sigma, niters=3, ksched="default", kmax=50,
+                      gpuid=0, clean=None, verbose=True, oracle=False,
+                      pm_deno="bayes",full_basic=False):
 
     # -- to torch --
     if not th.is_tensor(noisy):
@@ -134,8 +149,8 @@ def exec_npc(noisy, sigma, niters=3, ksched="default", kmax=50,
 
     # -- burst search space --
     params.sizeSearchTimeBwd[0] = 10
-    params.sizeSearchTimeFwd[0] = 10
-    params.sizeSearchWindow[0] = 10
+    params.sizeSearchTimeFwd[0] = 6
+    params.sizeSearchWindow[0] = 6
 
     # -- handle edge case --
     if oracle and not(clean is None):
@@ -198,6 +213,7 @@ def exec_npc(noisy, sigma, niters=3, ksched="default", kmax=50,
         # -- take step --
         proc_nl(images,flows,args)
         basic = images['deno'].clone()
+        th.cuda.empty_cache()
 
         # -- update new basic image --
         if full_basic: basic_l.append(basic.clone())
@@ -232,6 +248,139 @@ def exec_npc(noisy, sigma, niters=3, ksched="default", kmax=50,
         return_basic = basic_l
 
     return return_basic,errors
+
+def exec_npc_faiss(noisy, sigma, niters=3, ksched="default", kmax=50,
+                   gpuid=0, clean=None, verbose=True, oracle=False,
+                   pm_deno="bayes",full_basic=False):
+
+    # -- to torch --
+    if not th.is_tensor(noisy):
+        noisy = th.from_numpy(noisy)
+        if not(clean is None): clean = th.from_numpy(clean)
+
+    # -- to device --
+    device = 'cuda:%d' % gpuid
+    noisy = noisy.to(device)
+    noisy = noisy.type(th.float32).contiguous()
+    if not(clean is None):
+        clean = clean.to(device)
+        clean = clean.type(th.float32).contiguous()
+
+    # -- allocation --
+    c = int(noisy.shape[-3])
+    shape,device = noisy.shape,noisy.device
+    flows = alloc.allocate_flows(None,shape,device)
+
+    # -- parameters --
+    params = get_params(sigma,verbose)
+
+    # -- set misc --
+    params['bsize'][0] = int(1024*5)
+    # params['bsize'][0] = 4096
+    params['cpatches'][0] = "noisy"
+    # params['srch_img'][0] = "search"
+    params['srch_img'][0] = "search"
+    # params['srch_img'][0] = "basic"
+    params['deno'] = [pm_deno,pm_deno]
+    params['offset'][0] = 0.
+    params['sizePatchTime'][0] = 1
+    params['stride'] = [5,1]
+    params['nstreams'] = [1,1]
+    params['eigh_method'] = ["faiss","faiss"]
+    # params['eigh_method'] = ["torch","torch"]
+
+
+    # -- burst search space --
+    params.sizeSearchWindow[0] = 10
+    params.sizeSearchTimeBwd[0] = 6
+    params.sizeSearchTimeFwd[0] = 6
+
+    # -- handle edge case --
+    if oracle and not(clean is None):
+        errors = compute_error(noisy,None,clean,clean,flows,params,kmax)
+        # errors_i = compute_error(noisy,basic,clean,flows,params,kmax)
+        return clean,[errors]
+    elif oracle and clean is None:
+        raise ValueError("We want oracle case but clean image is None.")
+    elif oracle is True:
+        print("what?")
+        exit(0)
+
+    # -- get kschdule --
+    k_grid = get_size_grid(ksched,niters,kmax)
+    keep_grid = get_keep_grid(ksched,niters,kmax)
+
+    # -- exec iters --
+    errors = []
+
+    # -- compute first cluster error --
+    errors_0 = compute_error(noisy,None,clean,noisy,flows,params,kmax)
+    if verbose:
+        print("iter: %d" % -1)
+        print("errors_0: ",errors_0.mean().item(),errors_0.std().item())
+    errors.append(errors_0)
+
+    # -- loop over iters --
+    basic = noisy.clone()
+    if full_basic: basic_l = [noisy.clone()]
+    for i in range(niters):
+
+        # -- keep grid --
+        k = k_grid[i]
+        nkeep = keep_grid[i]
+
+        # -- set params --
+        params['nSimilarPatches'][0] = k
+        params['nkeep'][0] = nkeep
+        params['srch_img'][0] = "search"
+        params['cpatches'][0] = "noisy"
+
+        # -- parse args --
+        args = get_args(params,c,0,noisy.device)
+
+        # -- reallocate images --
+        images = alloc.allocate_images(noisy,basic,clean)
+        images.search = basic.clone()
+
+        # -- take step --
+        proc_nl_faiss(images,flows,args)
+        basic = images['deno'].clone()
+        th.cuda.empty_cache()
+
+        # -- update new basic image --
+        if full_basic: basic_l.append(basic.clone())
+
+        # -- compute cluster value --
+        # params['nSimilarPatches'][0] = kmax
+        # params['nkeep'][0] = 1
+        # args = get_args(params,c,0,noisy.device)
+        # images = alloc.allocate_images(noisy,basic,clean)
+        # images.search = basic.clone()
+        # errors_i = compute_cluster_quality(images,flows,args)
+        if not(clean is None):
+            errors_i = compute_error(noisy,basic,clean,basic,flows,params,kmax)
+            errors.append(errors_i)
+        else: errors.append(-th.ones(1))
+
+        # -- info --
+        if verbose:
+            print("iter: %d" % i)
+            print("nSimilarPatches: %d" % k)
+            print("nkeep: %d" % nkeep)
+            if not(clean is None):
+                print("errors_i: ",errors_i.mean().item(),errors_i.std().item())
+
+    # -- create errors --
+    k_grid = [-1] + list(k_grid)
+    errors = {str(int(k)):e for k,e in zip(k_grid,errors)}
+
+    # -- return all basic frames is "full_basic" is true --
+    return_basic = basic
+    if full_basic:
+        return_basic = basic_l
+
+    return return_basic,errors
+
 
 
 """
@@ -370,6 +519,7 @@ def compute_error(noisy,basic,clean,search,flows,params,kmax):
     params['nkeep'][0] = 1
     params['offset'][0] = 0.
     params['srch_img'][0] = "search"
+    params['version'] = ["eccv2022","eccv2022"]
     args = get_args(params,c,0,noisy.device)
     images = alloc.allocate_images(noisy,basic,clean,search)
     error = compute_cluster_quality(images,flows,args)

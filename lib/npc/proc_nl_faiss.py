@@ -35,25 +35,33 @@ import pprint
 pp = pprint.PrettyPrinter(indent=4)
 
 
+def batch_params(shape,bsize,stride):
+    # -- unpack --
+    t,c,h,w = shape
+    nelems = t*h*w
 
-def proc_nl(images,flows,args):
+    # -- num iters total --
+    nqueries = (nelems - 1)//stride + 1
+
+    # -- size per "search" call --
+    nbatches = (nqueries-1) // bsize + 1
+    return nqueries,nbatches
+
+
+def proc_nl_faiss(images,flows,args):
 
     # -- init --
     # pp.pprint(args)
-    args.version = "eccv2022"
-
-    # -- create access mask --
-    mask,ngroups = search_mask.init_mask(images.shape,args)
-    mask_r = repeat(mask,'t h w -> t c h w',c=3)
-    # save_burst(mask_r,"output/mask/","mask")
+    args.version = "faiss"
 
     # -- batching params --
-    nelems,nbatches = utils.batch_params(mask,args.bsize,args.nstreams)
-    cmasked_prev = nelems
+    assert args.nstreams == 1
+    nsteps,nbatches = batch_params(images.shape,args.bsize,args.stride)
+    print("nsteps: ",nsteps)
 
     # -- allocate memory --
     patches = alloc.allocate_patches(args.patch_shape,images.clean,args.device)
-    bufs = alloc.allocate_bufs(args.bufs_shape,args.device)
+    bufs = alloc.allocate_bufs_faiss(args.bufs_shape,args.device)
 
     # -- color xform --
     utils.rgb2yuv_images(images)
@@ -62,14 +70,11 @@ def proc_nl(images,flows,args):
     if args.verbose: print(f"Processing NPC [step {args.step}]")
 
     # -- over batches --
-    if args.verbose: pbar = tqdm(total=nelems)
+    if args.verbose: pbar = tqdm(total=nbatches)
     for batch in range(nbatches):
 
         # -- exec search --
-        done = search.exec_search(patches,images,flows,mask,bufs,args)
-
-        # -- refinemenent the searching --
-        # search.exec_refinement(patches,bufs,args.sigma)
+        done = search.exec_search(batch,patches,images,flows,bufs,args)
 
         # -- flat patches --
         update_flat_patch(patches,args)
@@ -86,55 +91,29 @@ def proc_nl(images,flows,args):
         fill_valid_patches(vpatches,patches,bufs)
 
         # -- aggregate patches --
-        agg.agg_patches(patches,images,bufs,args)
+        agg.agg_patches_faiss(batch,patches,images,bufs,args)
 
         # -- misc --
         torch.cuda.empty_cache()
 
         # -- loop update --
-        cmasked = mask.sum().item()
-        delta = cmasked_prev - cmasked
-        cmasked_prev = cmasked
-        nmasked  = nelems - cmasked
-        msg = "[Pixels %d/%d]: %d" % (nmasked,nelems,delta)
+        msg = "[Batch %d/%d]" % (batch+1,nbatches)
         if args.verbose:
             tqdm.write(msg)
-            # tqdm.write(("done: %d"%done))
-            # tqdm.write(("batches [%d/%d]"% (batch,nbatches)))
-            pbar.update(delta)
-
-        # -- logging --
-        # print("sum weights: ",torch.sum(images.weights).item())
-        # print("sum deno: ",torch.sum(images.deno).item())
-        # print("sum basic: ",torch.sum(images.basic).item())
+            pbar.update(1)
 
         # - terminate --
         if done: break
 
-    # -- reweight vals --
-    # reweight_vals(images)
-    # images.weights[th.where(images.weights<5)]=0
-    # print("sum: ",th.sum(images.weights>0).item())
+    # # -- reweight deno --
+    # weights = repeat(images.weights,'t h w -> t c h w',c=args.c)
+    # index = torch.nonzero(weights,as_tuple=True)
+    # images.deno[index] /= weights[index]
 
-    # -- reweight deno --
-    weights = repeat(images.weights,'t h w -> t c h w',c=args.c)
-    index = torch.nonzero(weights,as_tuple=True)
-    images.deno[index] /= weights[index]
-
-    # -- fill zeros with basic --
-    fill_img = images.basic if args.step==1 else images.noisy
-    index = torch.nonzero(weights==0,as_tuple=True)
-    images.deno[index] = fill_img[index]
-
-    # -- inspect mask --
-    save_mask = False
-    if save_mask:
-        mask = images.weights == 0
-        print("mask.shape: ",mask.shape)
-        mask = mask.type(th.float)[:,None]
-        print("mask.shape: ",mask.shape,mask.dtype)
-        tvu.save_image(mask,"output/mask.png")
-        exit(0)
+    # # -- fill zeros with basic --
+    # fill_img = images.basic if args.step==1 else images.noisy
+    # index = torch.nonzero(weights==0,as_tuple=True)
+    # images.deno[index] = fill_img[index]
 
     # -- color xform --
     utils.yuv2rgb_images(images)
@@ -185,5 +164,3 @@ def get_valid_patches(patches,bufs):
 
 def proc_nl_cache(vid_set,vid_name,sigma):
     return read_nl_sequence(vid_set,vid_name,sigma)
-
-

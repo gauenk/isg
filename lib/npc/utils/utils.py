@@ -104,6 +104,10 @@ def optional(pydict,field,default):
     if field in pydict: return pydict[field]
     else: return default
 
+def optional_rm(pydict,field):
+    if pydict is None:return
+    if field in pydict: del pydict[field]
+
 # def optional(pydict,key,default,dtype=None):
 
 #     # -- get elem --
