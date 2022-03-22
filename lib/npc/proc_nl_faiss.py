@@ -73,6 +73,11 @@ def proc_nl_faiss(images,flows,args):
     if args.verbose: pbar = tqdm(total=nbatches)
     for batch in range(nbatches):
 
+        # -- info --
+        alloc_bytes = th.cuda.memory_allocated()
+        # alloc_bytes = th.cuda.memory_reserved()
+        alloc_gb = alloc_bytes# / (1.*1e9)
+
         # -- exec search --
         done = search.exec_search(batch,patches,images,flows,bufs,args)
 
@@ -94,7 +99,7 @@ def proc_nl_faiss(images,flows,args):
         agg.agg_patches_faiss(batch,patches,images,bufs,args)
 
         # -- misc --
-        torch.cuda.empty_cache()
+        th.cuda.empty_cache()
 
         # -- loop update --
         msg = "[Batch %d/%d]" % (batch+1,nbatches)
@@ -119,11 +124,11 @@ def proc_nl_faiss(images,flows,args):
     utils.yuv2rgb_images(images)
 
     # -- synch --
-    torch.cuda.synchronize()
+    th.cuda.synchronize()
 
 def reweight_vals(images):
     nmask_before = images.weights.sum().item()
-    index = torch.nonzero(images.weights,as_tuple=True)
+    index = th.nonzero(images.weights,as_tuple=True)
     images.vals[index] /= images.weights[index]
     irav = images.vals.ravel().cpu().numpy()
     print(np.quantile(irav,[0.1,0.2,0.5,0.8,0.9]))

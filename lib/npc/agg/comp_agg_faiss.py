@@ -40,8 +40,15 @@ def agg_patches_faiss(step,patches,images,bufs,args):
     #                faiss_args,faiss_bufs,pfill=True)
     pnoisy = patches.noisy[:bsize]
     # pnoisy = patches.clean[:bsize]
+    imin,imax = bufs.inds.min().item(),bufs.inds.max().item()
+    # print("bufs.inds[min,max]: ",imin,imax)
+    # print("bufs.inds.shape: ",bufs.inds.shape)
+    # print("qstart,step: ",qstart,step)
+    # print("images.deno.shape: ",images.deno.shape,images.deno.device)
+    # print("pnoisy.shape: ",pnoisy.shape)
 
-    kn3.run_fill(images.deno,pnoisy,qstart,faiss_args,"p2b",bufs.inds)
+    kn3.run_fill(images.deno,pnoisy,qstart,faiss_args,"p2b",None)#bufs.inds)
+    # print("post fill.")
 
     # # -- iterate over "nkeep" --
     # if args.nkeep != -1:

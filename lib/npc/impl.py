@@ -275,7 +275,7 @@ def exec_npc_faiss(noisy, sigma, niters=3, ksched="default", kmax=50,
     params = get_params(sigma,verbose)
 
     # -- set misc --
-    params['bsize'][0] = int(1024*5)
+    params['bsize'][0] = int(1024*10)
     # params['bsize'][0] = 4096
     params['cpatches'][0] = "noisy"
     # params['srch_img'][0] = "search"
@@ -343,9 +343,10 @@ def exec_npc_faiss(noisy, sigma, niters=3, ksched="default", kmax=50,
         images.search = basic.clone()
 
         # -- take step --
+        print("Starting iteration: ",i)
         proc_nl_faiss(images,flows,args)
         basic = images['deno'].clone()
-        th.cuda.empty_cache()
+        # th.cuda.empty_cache()
 
         # -- update new basic image --
         if full_basic: basic_l.append(basic.clone())
