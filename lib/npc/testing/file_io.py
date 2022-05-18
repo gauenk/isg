@@ -4,6 +4,7 @@ import cv2,sys
 import subprocess
 import pathlib
 import numpy as np
+import torch as th
 from pathlib import Path
 from einops import rearrange
 from easydict import EasyDict as edict
@@ -221,6 +222,8 @@ def save_images(tensor,fn,imax=255.):
     nrows = ntotal // nframes
 
     # -- squash image values --
+    if th.is_tensor(tensor):
+        tensor = tensor.cpu().numpy()
     tensor = tensor.astype(np.float32) / imax
     tensor = np.clip(255.*tensor,0,255)
     tensor = np.uint8(tensor)

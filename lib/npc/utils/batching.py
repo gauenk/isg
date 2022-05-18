@@ -15,6 +15,18 @@ def batch_params(mask,bsize,nstreams):
     nbatches = divUp(nelems,nstreams*bsize)
     return nelems,nbatches
 
+def batch_params_faiss(shape,bsize,stride):
+    # -- unpack --
+    t,c,h,w = shape
+    nelems = t*h*w
+
+    # -- num iters total --
+    nqueries = (nelems - 1)//stride + 1
+
+    # -- size per "search" call --
+    nbatches = (nqueries-1) // bsize + 1
+    return nqueries,nbatches
+
 def divUp(a,b): return (a-1)//b+1
 
 def get_hw_batches(h,w,bsize):
@@ -24,7 +36,7 @@ def get_hw_batches(h,w,bsize):
 
 def view_batch(tensor,start,size):
     if tensor is None: return None
-    bslice = slice(start*size,start*(size+1))
+    bslice = slice(start*size,(start+1)*size)
     return tensor[bslice]
 
 def view_image(tensor,h_start,w_start,size):

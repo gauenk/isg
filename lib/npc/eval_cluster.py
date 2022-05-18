@@ -34,19 +34,28 @@ from npc.testing import save_images
 from npc.utils.streams import init_streams,wait_streams
 import pprint
 pp = pprint.PrettyPrinter(indent=4)
+from npc.utils import Timer
 
 
-
+@Timer("compute_cluster_quality_eccv2022")
 def compute_cluster_quality(images,flows,args):
 
     # -- dont run if no comparison
     if images.clean is None: return -th.ones(1)
+
+    # -- set params --
+    args.aggreBoost = False
+    args.stype = "l2"
+    args.rand_mask = False
+    args.bsize = 10*1024
+    # args.stype = "faiss"
 
     # -- init --
     # pp.pprint(args)
 
     # -- create access mask --
     mask,ngroups = search_mask.init_mask(images.shape,args)
+    mask[...] = 1
     mask_r = repeat(mask,'t h w -> t c h w',c=3)
 
     # -- allocate memory --
@@ -68,13 +77,11 @@ def compute_cluster_quality(images,flows,args):
     if args.verbose: print(f"Computing NPC Cluster Quality")
 
     # -- over batches --
+    if args.verbose: print("[eccv2022] nelems over nbatches: ",nelems,nbatches)
     for batch in range(nbatches):
 
         # -- exec search --
         done = search.exec_search(patches,images,flows,mask,bufs,args)
-
-        # -- flat patches --
-        update_flat_patch(patches,args)
 
         # -- valid patches --
         vpatches = get_valid_patches(patches,bufs)
@@ -83,13 +90,71 @@ def compute_cluster_quality(images,flows,args):
 
         # -- compute error per patch --
         compute_error(errors,vpatches,batch,error_index,args.c,args.pt)
-        error_index += len(vpatches)
+        error_index += vpatches.shape[0]
 
     # -- synch --
     torch.cuda.synchronize()
 
     # -- drop -1 terms --
     errors = errors[th.where(errors > -1)]
+
+    return errors
+
+@Timer("compute_cluster_quality_faiss")
+def compute_cluster_quality_faiss(images,flows,args):
+
+    # -- dont run if no comparison
+    if images.clean is None: return -th.ones(1)
+    args.bsize = 10*1024
+    args.nstreams = 1
+
+    # -- init --
+    # pp.pprint(args)
+    assert args.stride == 1
+    nqueries,nbatches = utils.batch_params_faiss(images.shape,args.bsize,args.stride)
+
+    # -- allocate memory --
+    patches = alloc.allocate_patches(args.patch_shape,images.clean,args.device)
+    bufs = alloc.allocate_bufs_faiss(args.bufs_shape,args.device)
+
+    # -- checking shapes --
+    t,c,h,w = images.shape
+    nelems = t*h*w
+    assert nelems == nqueries
+    print("nqueries: ",nqueries)
+
+    # -- create error acc --
+    error_index = 0
+    errors = -th.ones(nqueries).to(images.clean.device)
+
+    # -- color xform --
+    utils.rgb2yuv_images(images)
+
+    # -- logging --
+    if args.verbose: print(f"Computing NPC Cluster Quality")
+
+    # -- over batches --
+    print("nelems over nbatches: ",nelems,nbatches)
+    for batch in range(nbatches):
+
+        # -- exec search --
+        done = search.exec_search(batch,patches,images,flows,bufs,args)
+
+        # -- valid patches --
+        vpatches = get_valid_patches(patches,bufs)
+        if vpatches.shape[0] == 0:
+            break
+
+        # -- compute error per patch --
+        compute_error(errors,vpatches,batch,error_index,args.c,args.pt)
+        error_index += vpatches.shape[0]
+
+    # -- synch --
+    torch.cuda.synchronize()
+
+    # -- drop -1 terms --
+    errors = errors[th.where(errors > -1)]
+    print("len(errors): ",len(errors))
 
     return errors
 
@@ -145,7 +210,7 @@ def compute_cluster_quality_at_ind(ind,images,flows,args):
 
         # -- compute error per patch --
         compute_error(errors,vpatches,batch,error_index,args.c,args.pt)
-        error_index += len(vpatches)
+        error_index += vpatches.shape[0]
 
     # -- synch --
     torch.cuda.synchronize()

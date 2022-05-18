@@ -19,10 +19,10 @@ import npc.search_mask as search_mask
 # -- utils --
 from npc.utils.batching import view_batch
 from npc.utils.logger import vprint
-from npc.utils import divUp
+from npc.utils import divUp,get_3d_inds,get_flat_inds
 from npc.utils import Timer
 
-@Timer("exec_search_eccv2022")
+# @Timer("exec_search_eccv2022")
 def exec_search_eccv2022(patches,imgs,flows,mask,bufs,args):
 
     # -- setup --
@@ -47,18 +47,19 @@ def exec_search_eccv2022(patches,imgs,flows,mask,bufs,args):
         # -- grab batch --
         vbufs = edict()
         for key in bufs.keys():
-            vbufs[key] = view_batch(bufs[key],bsize,index)
+            vbufs[key] = view_batch(bufs[key],index,bsize)
 
         vpatches = edict()
         for key in patches.keys():
-            vpatches[key] = view_batch(patches[key],bsize,index)
+            vpatches[key] = view_batch(patches[key],index,bsize)
 
         # -- exec search --
         search_and_fill(imgs,vpatches,vbufs,srch_inds,flows,args)
 
         # -- update mask naccess --
         before = mask.sum().item()
-        search_mask.update_mask_inds(mask,vbufs.inds,args.c,args.nkeep)
+        search_mask.update_mask_inds(mask,vbufs.inds,args.c,args.nkeep,
+                                     boost=args.aggreBoost)
         after = mask.sum().item()
 
         # -- wait for all streams --
@@ -81,7 +82,7 @@ def search_and_fill(imgs,patches,bufs,srch_inds,flows,args):
     elif args.srch_img == "search":
         srch_img = imgs.search
     else:
-        raise ValueError(f"uknown search image [{srch_img}]")
+        raise ValueError(f"uknown search image [{args.srch_img}]")
     # srch_img = imgs.noisy if args.step == 0 else imgs.basic
     # srch_img = srch_img if (imgs.clean is None) else imgs.clean
 
@@ -90,6 +91,15 @@ def search_and_fill(imgs,patches,bufs,srch_inds,flows,args):
     bufs.vals[...] = float("inf")
     vpss.exec_sim_search_burst(srch_img,srch_inds,bufs.vals,
                                bufs.inds,flows,args.sigma,args)
+
+    # -- ensure 1st location is self [no matter what] --
+    t,c,h,w = srch_img.shape
+    flat_inds = get_flat_inds(srch_inds,c,h,w)
+
+    # -- fill partial with first inds --
+    bsize = flat_inds.shape[0]
+    bufs.inds[:bsize,0] = flat_inds
+    bufs.vals[:,0] = 0.
 
     # -- fill patches --
     for key in imgs.patch_images:

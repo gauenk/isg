@@ -1,11 +1,18 @@
 
-# -- python --
+# -- misc --
 import torch,math
+
+# -- this package --
+import npc
+
+# -- linalg --
+import numpy as np
+import torch as th
+from einops import rearrange,repeat
+
+# -- extra linalg --
 import scipy
 from scipy import linalg as scipy_linalg
-import numpy as np
-from einops import rearrange,repeat
-import npc
 
 # -- fast eigh --
 from faiss.contrib import kn3
@@ -28,14 +35,16 @@ def denoise(patches,args):
     flat_pdim(patches)
 
     # -- center patches --
-    cnoisy,cbasic = center_patches(patches.noisy,patches.basic,
-                                   patches.flat,args.step==1,args.c)
+    pinput = get_image(patches.noisy,patches.basic,args.cpatches,args.mix_param)
+    cnoisy,cbasic = center_patches(patches.noisy,patches.basic,pinput,
+                                   patches.flat,args.step==1,args.c,
+                                   args.pool_type,args.pool_lamb)
 
     # -- flatten across batch --
     flat_bdim(patches)
 
     # -- cov --
-    pinput = patches.noisy if args.cpatches == "noisy" else patches.basic
+    pinput = get_image(patches.noisy,patches.basic,args.cpatches,args.mix_param)
     covMat,eigVals,eigVecs = compute_cov_mat(pinput,args.rank,args.eigh_method)
 
     # -- eigen values --
@@ -65,6 +74,17 @@ def denoise(patches,args):
     return rank_var
 
 
+def get_image(cnoisy,cbasic,cpatches,mix_param):
+    if cpatches == "mix":
+        a = mix_param
+        return a * cnoisy + (1 - a) * cbasic
+    elif cpatches == "noisy":
+        return cnoisy
+    elif cpatches == "basic":
+        return cbasic
+    else:
+        raise ValueError("Uknown cpatches.")
+
 def flat_bdim(patches):
     shape_str = "b c n p -> (b c) n p"
     reshape_patches(patches,shape_str)
@@ -88,29 +108,37 @@ def reshape_patches(patches,shape_str,**shape_key):
         if patches[img] is None: continue
         patches[img] = rearrange(patches[img],shape_str,**shape_key)
 
-def center_patches(pnoisy,pbasic,flat_patch,step2,c):
+def center_patches(pnoisy,pbasic,pinput,flat_patch,step2,c,pool_type,pool_lamb):
 
     # -- center basic --
     cbasic = None
-    if step2:
-        cbasic = centering(pbasic)
+    if step2: # "step2" does not exist in "npc"
+        cbasic = pool_samples(pbasic,pbasic,pool_type,pool_lamb)
+        pbasic[...] -= cbasic
 
     # -- choose center for noisy --
-    cnoisy = pnoisy.mean(dim=2,keepdim=True)
+    cnoisy = pool_samples(pnoisy,pinput,pool_type,pool_lamb)
     if step2:
         flat_inds = torch.where(flat_patch == 1)[0]
         cnoisy[flat_inds] = cbasic[flat_inds]
 
     # -- center noisy --
-    cnoisy = centering(pnoisy,cnoisy)
+    pnoisy[...] -= cnoisy
 
     return cnoisy,cbasic
 
-def centering(patches,center=None):
-    if center is None:
-        center = patches.mean(dim=2,keepdim=True)
-    patches[...] -= center
-    return center
+def pool_samples(pnoisy,pbasic,pname,plamb):
+    if pname == "default":
+        return pnoisy.mean(dim=2,keepdim=True)
+    elif pname == "weighted":
+        dist = th.mean(pbasic[:,:,[0],:]-pbasic,-1,True)
+        weight = th.exp(-plamb * dist)
+        weight /= th.sum(weight,-2,True)
+        wpatches = weight * pnoisy
+        mp = wpatches.mean(dim=2,keepdim=True)
+        return mp
+    else:
+        raise ValueError(f"Uknown pooling type [{pname}]")
 
 def compute_cov_mat(patches,rank,eigh_method):
 
@@ -127,6 +155,9 @@ def compute_cov_mat(patches,rank,eigh_method):
             eigVals= torch.flip(eigVals,dims=(1,))
             eigVecs = torch.flip(eigVecs,dims=(2,))[...,:rank]
         elif eigh_method == "faiss":
+            print(covMat.shape)
+            print(covMat.ravel()[:3])
+            print(covMat.ravel().max(),covMat.ravel().min())
             eigVals,eigVecs = kn3.tiny_eigh(covMat.clone())
             eigVecs = eigVecs[...,:rank]
         else:

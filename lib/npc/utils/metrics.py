@@ -66,7 +66,9 @@ def compute_psnrs(deno,clean,imax=255.):
     # -- normalize --
     deno = deno/imax
     clean = clean/imax
+    eps = 1e-16
 
-    psnr = -10 * np.log10(((deno - clean) ** 2).mean(axis=(-3, -2, -1), keepdims=False))
+    psnr = -10 * np.log10(((deno - clean) ** 2+eps).mean(axis=(-3, -2, -1),
+                                                         keepdims=False))
     return psnr
 

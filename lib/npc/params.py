@@ -24,7 +24,7 @@ def default_params(sigma,verbose=False):
     params.nThreads = [-1,-1]
     params.nSimilarPatches = [100,60]
     params.nkeep = [-1,-1]
-    params.nstreams = [15,15]
+    params.nstreams = [1,1]
     params.offset = [2*(sigma/255.)**2,0.]
     params.onlyFrame = [-1,-1]
     params.procStep = [3,3]
@@ -43,7 +43,8 @@ def default_params(sigma,verbose=False):
     params.use_imread = [False,False]
     params.stype = ["l2","l2"]
     params.srch_img = ["noisy","basic"]
-    params.cpatches = ["noisy","basic"]
+    # params.cpatches = ["noisy","basic"]
+    params.cpatches = ["mix","mix"]
     params.deno = ["bayes","bayes"]
     params.var_mode = [0,0]
     params.variThres = [2.7,0.7] # 0.7
@@ -51,6 +52,16 @@ def default_params(sigma,verbose=False):
     params.rand_mask = [True,True]
     params.eigh_method = ["torch","torch"]
     # params.eigh_method = ["faiss","faiss"]
+    params.version = ["eccv2022","eccv2022"]
+    # params.version = ["faiss","faiss"]
+    params.stride = [1,1]
+    params.agg_type = ["mixed","mixed"]
+    params.pool_type = ["weighted","weighted"]
+    params.pool_lamb = [0.,0.]
+    params.mix_param = [0.,0.]
+    params.agg_k_lamb = [0.,0.]
+    params.agg_p_lamb = [0.,0.]
+
     return params
 
 def get_params(sigma,verbose=False,version=None):
@@ -212,6 +223,8 @@ def get_args(params,c,step,device):
         """
 
         @property
+        def k(self): return self.nSimilarPatches
+        @property
         def ps(self): return self.sizePatch
         @property
         def ps_t(self): return self.sizePatchTime
@@ -220,7 +233,11 @@ def get_args(params,c,step,device):
         @property
         def npatches(self): return self.nSimilarPatches
         @property
+        def ws(self): return self.sizeSearchWindow
+        @property
         def w_s(self): return self.sizeSearchWindow
+        @property
+        def wt(self): return self.sizeSearchTimeFwd
         @property
         def nWt_f(self): return self.sizeSearchTimeFwd
         @property

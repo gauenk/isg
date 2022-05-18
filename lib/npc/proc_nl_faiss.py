@@ -27,26 +27,12 @@ from npc.utils import idx2coords,coords2idx,patches2groups,groups2patches
 
 # -- project imports --
 from npc.utils.gpu_utils import apply_color_xform_cpp,yuv2rgb_cpp
-from npc.utils import groups2patches,patches2groups,optional,divUp,save_burst
+from npc.utils import groups2patches,patches2groups,optional,divUp,save_burst,batch_params_faiss
 from npc.utils.video_io import read_nl_sequence
 from npc.testing import save_images
 from npc.utils.streams import init_streams,wait_streams
 import pprint
 pp = pprint.PrettyPrinter(indent=4)
-
-
-def batch_params(shape,bsize,stride):
-    # -- unpack --
-    t,c,h,w = shape
-    nelems = t*h*w
-
-    # -- num iters total --
-    nqueries = (nelems - 1)//stride + 1
-
-    # -- size per "search" call --
-    nbatches = (nqueries-1) // bsize + 1
-    return nqueries,nbatches
-
 
 def proc_nl_faiss(images,flows,args):
 
@@ -56,7 +42,7 @@ def proc_nl_faiss(images,flows,args):
 
     # -- batching params --
     assert args.nstreams == 1
-    nsteps,nbatches = batch_params(images.shape,args.bsize,args.stride)
+    nsteps,nbatches = batch_params_faiss(images.shape,args.bsize,args.stride)
     print("nsteps: ",nsteps)
 
     # -- allocate memory --

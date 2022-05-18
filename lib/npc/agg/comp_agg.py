@@ -13,6 +13,12 @@ import npc.search_mask as imask
 from npc.utils import groups2patches
 from npc.utils import Timer
 
+# -- local --
+from .agg_midpix import agg_patches_midpix
+from .agg_kweight import agg_patches_kweight
+from .agg_pweight import agg_patches_pweight
+from .agg_mixed import agg_patches_mixed
+
 def computeAggregation(deno,group,indices,weights,mask,nSimP,params=None,step=0):
 
     # # -- create python-params for parser --
@@ -47,7 +53,22 @@ def computeAggregation(deno,group,indices,weights,mask,nSimP,params=None,step=0)
     return results
 
 @Timer("agg_patches")
-def agg_patches(patches,images,bufs,args,cs_ptr=None):
+def agg_patches(patches,images,bufs,args,cs_ptr=None,denom="chw"):
+    stype = args.agg_type
+    if stype == "default":
+        agg_patches_default(patches,images,bufs,args,cs_ptr,denom=denom)
+    elif stype == "k-weight":
+        agg_patches_kweight(patches,images,bufs,args,cs_ptr,denom=denom)
+    elif stype == "p-weight":
+        agg_patches_pweight(patches,images,bufs,args,cs_ptr,denom=denom)
+    elif stype == "midpix":
+        agg_patches_midpix(patches,images,bufs,args,cs_ptr,denom=denom)
+    elif stype == "mixed":
+        agg_patches_mixed(patches,images,bufs,args,cs_ptr,denom=denom)
+    else:
+        raise ValueError(f"Uknown aggregate type {stype}.")
+
+def agg_patches_default(patches,images,bufs,args,cs_ptr=None,denom="chw"):
 
     # -- default stream --
     if cs_ptr is None:
@@ -72,7 +93,7 @@ def agg_patches(patches,images,bufs,args,cs_ptr=None):
     #     #                                 vvals,images.vals,args.ps,args.ps_t,cs_ptr)
     # else:
     compute_agg_batch(images.deno,vnoisy,vinds,images.weights,
-                      vvals,images.vals,args.ps,args.ps_t,cs_ptr)
+                      vvals,images.vals,args.ps,args.ps_t,cs_ptr,denom=denom)
 
 # def scatter_agg(deno,patches,inds,weights,vals,ivals,ps,ps_t,cs_ptr):
 # conflicts across patches
@@ -153,7 +174,7 @@ def agg_patches(patches,images,bufs,args,cs_ptr=None):
 
 
 
-def compute_agg_batch(deno,patches,inds,weights,vals,ivals,ps,ps_t,cs_ptr):
+def compute_agg_batch(deno,patches,inds,weights,vals,ivals,ps,ps_t,cs_ptr,denom="chw"):
 
     # -- numbify the torch tensors --
     deno_nba = cuda.as_cuda_array(deno)
@@ -173,10 +194,10 @@ def compute_agg_batch(deno,patches,inds,weights,vals,ivals,ps,ps_t,cs_ptr):
     # -- launch kernel --
     # exec_agg_cuda[blocks,threads,cs_nba](deno_nba,patches_nba,inds_nba,weights_nba,
     #                                      vals_nba_,ivals_nba,ps,ps_t)
-    exec_agg_simple(deno,patches,inds,weights,vals,ivals,ps,ps_t)
+    exec_agg_simple(deno,patches,inds,weights,vals,ivals,ps,ps_t,denom=denom)
 
 
-def exec_agg_simple(deno,patches,inds,weights,vals,ivals,ps,ps_t):
+def exec_agg_simple(deno,patches,inds,weights,vals,ivals,ps,ps_t,denom="chw"):
 
     # -- numbify --
     device = deno.device
@@ -189,7 +210,8 @@ def exec_agg_simple(deno,patches,inds,weights,vals,ivals,ps,ps_t):
 
     # -- exec numba --
     exec_agg_simple_numba(deno_nba,patches_nba,inds_nba,
-                          weights_nba,vals_nba,ivals_nba,ps,ps_t)
+                          weights_nba,vals_nba,ivals_nba,ps,ps_t,
+                          denom=denom)
 
     # -- back pack --
     deno_nba = torch.FloatTensor(deno_nba).to(device)
@@ -201,19 +223,20 @@ def exec_agg_simple(deno,patches,inds,weights,vals,ivals,ps,ps_t):
 
 
 @njit
-def exec_agg_simple_numba(deno,patches,inds,weights,vals,ivals,ps,ps_t):
+def exec_agg_simple_numba(deno,patches,inds,weights,vals,ivals,ps,ps_t,denom="chw"):
 
     # -- shape --
     nframes,color,height,width = deno.shape
     chw = color*height*width
     hw = height*width
     bsize,npatches = inds.shape # "npatches" _must_ be from "inds"
+    Z = chw if denom == "chw" else hw
 
     for bi in range(bsize):
         for ni in range(npatches):
             ind = inds[bi,ni]
             if ind == -1: continue
-            t0 = ind // chw
+            t0 = ind // Z
             h0 = (ind % hw) // width
             w0 = ind % width
 

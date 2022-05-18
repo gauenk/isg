@@ -1,4 +1,5 @@
-from .utils import check_omp_num_threads,patches2groups,groups2patches
+from .utils import check_omp_num_threads,patches2groups,groups2patches,get_3d_inds
+from .utils import get_flat_inds
 from .utils import get_patch_shapes_from_params,optional,groups2patches,check_flows,check_and_expand_flows,optional_rm
 from .utils import ndarray_ctg_dtype,rgb2bw,check_none,divUp
 # from .utils import idx2coords,coords2idx,patches2groups,groups2patches
@@ -14,9 +15,10 @@ from .logger import Logger,vprint
 from .video_io import *
 from .timer import Timer
 
-from .batching import batch_params,view_batch
+from .batching import batch_params,batch_params_faiss,view_batch
 from .flat_areas import update_flat_patch
 from .color import rgb2yuv_images,yuv2rgb_images
 from .metrics import compute_psnrs,skimage_psnr
+from .est_sigma import compute_sigma_vid
 
 from .util_faiss import bufs_npc2faiss,args_npc2faiss

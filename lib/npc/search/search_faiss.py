@@ -23,7 +23,7 @@ from npc.utils import divUp
 from npc.utils import Timer
 from npc.utils import bufs_npc2faiss,args_npc2faiss
 
-@Timer("exec_search_faiss")
+# @Timer("exec_search_faiss")
 def exec_search_faiss(step,patches,imgs,flows,bufs,args):
 
     # -- setup --
@@ -52,11 +52,11 @@ def exec_search_faiss(step,patches,imgs,flows,bufs,args):
         # -- grab batch --
         vbufs = edict()
         for key in bufs.keys():
-            vbufs[key] = view_batch(bufs[key],bsize_b,index)
+            vbufs[key] = view_batch(bufs[key],index,bsize_b)
 
         vpatches = edict()
         for key in patches.keys():
-            vpatches[key] = view_batch(patches[key],bsize_b,index)
+            vpatches[key] = view_batch(patches[key],index,bsize_b)
 
         # -- exec search --
         assert index == 0
@@ -85,8 +85,8 @@ def search_and_fill(imgs,patches,bufs,qstart,flows,args):
         raise ValueError(f"uknown search image [{srch_img}]")
 
     # -- sim search block --
-    bufs.inds[...] = -1
-    bufs.vals[...] = float("inf")
+    # bufs.inds[...] = -1
+    # bufs.vals[...] = float("inf")
 
     # -- exec search --
     # srch_img = imgs.clean
@@ -95,7 +95,7 @@ def search_and_fill(imgs,patches,bufs,qstart,flows,args):
     faiss_bufs = bufs_npc2faiss(patches,bufs)
     bsize = faiss_bufs.patches.shape[0]
     kn3.run_search(srch_img,qstart,bsize,flows,args.sigma,
-                   faiss_args,faiss_bufs,pfill=True)
+                   faiss_args,faiss_bufs,pfill=False)
     nl_inds = faiss_bufs.inds # non-local inds
 
     # -- fill patches --

@@ -10,7 +10,7 @@ import torch as th
 def rgb2yuv_images(images):
     for key in images.ikeys:
         if images[key] is None: continue
-        images[key] = rgb2yuv_cpp(images[key])
+        images[key] = rgb2yuv_cpp(images[key]).contiguous()
 
 def yuv2rgb_images(images):
     for key in images.ikeys:
