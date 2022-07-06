@@ -27,7 +27,7 @@ from .eval_deltas import compute_nn_patches
 
 def get_size_grid(sched,niters,kmax):
     if sched == "default":
-        kgrid = np.linspace(2,kmax,niters).astype(np.int)
+        kgrid = np.linspace(2,kmax,niters).astype(np.int32)
         return kgrid
     elif sched == "k-weight":
         if kmax == 50: kgrid = [2,5,10,15,25,35,45,50]
@@ -243,7 +243,8 @@ def compute_pm_error(search,clean,sigma,flows=None,
     return error
 
 def exec_npc(noisy, sigma, **kwargs):
-    version = optional(kwargs,"version","faiss")
+    version = optional(kwargs,"version","eccv2022")
+    # version = optional(kwargs,"version","faiss")
     optional_rm(kwargs,"version")
     if version == "eccv2022":
         return exec_npc_eccv2022(noisy,sigma,**kwargs)
@@ -347,7 +348,7 @@ def exec_npc_eccv2022(noisy, sigma, niters=3, ksched="default", kmax=50,
 
     # -- loop over iters --
     basic = noisy.clone() if basic is None else basic
-    if full_basic: basic_l = [noisy.clone()]
+    if full_basic: basic_l = [basic.clone()]
     for i in range(niters):
 
         # -- keep grid --

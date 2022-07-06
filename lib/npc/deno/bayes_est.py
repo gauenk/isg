@@ -131,11 +131,11 @@ def pool_samples(pnoisy,pbasic,pname,plamb):
     if pname == "default":
         return pnoisy.mean(dim=2,keepdim=True)
     elif pname == "weighted":
-        dist = th.mean(pbasic[:,:,[0],:]-pbasic,-1,True)
+        dist = th.mean(((pbasic[:,:,[0],:]-pbasic)/255.)**2,-1,True)
         weight = th.exp(-plamb * dist)
         weight /= th.sum(weight,-2,True)
         wpatches = weight * pnoisy
-        mp = wpatches.mean(dim=2,keepdim=True)
+        mp = wpatches.sum(dim=2,keepdim=True)
         return mp
     else:
         raise ValueError(f"Uknown pooling type [{pname}]")
